@@ -1,0 +1,340 @@
+// ─── Prisma Schema for FixConnect ─────────────────────────────────────────────
+// This file defines ALL your database tables and their relationships.
+// Run `npx prisma migrate dev --config prisma.config.ts` to apply changes.
+// Run `npx prisma studio --config prisma.config.ts` to view/edit your data in a browser UI.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // url is now configured in prisma.config.ts (Prisma 7+ requirement)
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum Role {
+  CUSTOMER
+  ARTISAN
+  ADMIN
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  DISPUTED
+}
+
+enum PaymentStatus {
+  PENDING
+  HELD
+  RELEASED
+  REFUNDED
+  FAILED
+}
+
+enum NotificationType {
+  BOOKING_CONFIRMED
+  BOOKING_REMINDER
+  BOOKING_CANCELLED
+  PAYMENT_SUCCESS
+  PAYMENT_REFUNDED
+  REVIEW_REQUEST
+  MESSAGE_RECEIVED
+  PROMO
+}
+
+// ─── User ─────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  phone        String   @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  avatarUrl    String?
+  role         Role     @default(CUSTOMER)
+  isVerified   Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  artisanProfile     ArtisanProfile?
+  bookingsAsCustomer Booking[]       @relation("CustomerBookings")
+  paymentMethods     PaymentMethod[]
+  sentMessages       Message[]       @relation("SentMessages")
+  notifications      Notification[]
+  reviews            Review[]        @relation("CustomerReviews")
+  otps               Otp[]
+  refreshTokens      RefreshToken[]
+  savedAddresses     SavedAddress[]
+
+  @@map("users")
+}
+
+// ─── OTP ──────────────────────────────────────────────────────────────────────
+
+model Otp {
+  id        String   @id @default(cuid())
+  userId    String
+  code      String
+  purpose   String   // "VERIFY_PHONE" | "FORGOT_PASSWORD"
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("otps")
+}
+
+// ─── Refresh Token ─────────────────────────────────────────────────────────────
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+// ─── Artisan Profile ──────────────────────────────────────────────────────────
+
+model ArtisanProfile {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  bio            String?
+  specialty      String
+  startingPrice  Float
+  location       String
+  isVerified     Boolean  @default(false)
+  isOnline       Boolean  @default(false)
+  completedJobs  Int      @default(0)
+  rating         Float    @default(0)
+  responseTime   String?
+  weeklySchedule Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookings    Booking[]         @relation("ArtisanBookings")
+  reviews     Review[]
+  workSamples WorkSample[]
+  categories  ArtisanCategory[]
+
+  @@map("artisan_profiles")
+}
+
+// ─── Work Sample ──────────────────────────────────────────────────────────────
+
+model WorkSample {
+  id               String         @id @default(cuid())
+  artisanProfileId String
+  imageUrl         String
+  caption          String?
+  createdAt        DateTime       @default(now())
+
+  artisanProfile   ArtisanProfile @relation(fields: [artisanProfileId], references: [id], onDelete: Cascade)
+
+  @@map("work_samples")
+}
+
+// ─── Service Category ─────────────────────────────────────────────────────────
+
+model ServiceCategory {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  iconUrl     String?
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  artisans ArtisanCategory[]
+  bookings Booking[]
+
+  @@map("service_categories")
+}
+
+// ─── Artisan <-> Category (Many-to-Many) ──────────────────────────────────────
+
+model ArtisanCategory {
+  artisanProfileId String
+  categoryId       String
+
+  artisanProfile ArtisanProfile  @relation(fields: [artisanProfileId], references: [id], onDelete: Cascade)
+  category       ServiceCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([artisanProfileId, categoryId])
+  @@map("artisan_categories")
+}
+
+// ─── Booking ──────────────────────────────────────────────────────────────────
+
+model Booking {
+  id                 String        @id @default(cuid())
+  customerId         String
+  artisanProfileId   String
+  categoryId         String
+  serviceDescription String
+  scheduledDate      DateTime
+  timeSlot           String
+  address            String
+  notes              String?
+  totalAmount        Float
+  status             BookingStatus @default(PENDING)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  customer       User            @relation("CustomerBookings", fields: [customerId], references: [id])
+  artisanProfile ArtisanProfile  @relation("ArtisanBookings", fields: [artisanProfileId], references: [id])
+  category       ServiceCategory @relation(fields: [categoryId], references: [id])
+
+  payment       Payment?
+  review        Review?
+  messages      Message[]
+  notifications Notification[]
+
+  @@map("bookings")
+}
+
+// ─── Payment ──────────────────────────────────────────────────────────────────
+
+model Payment {
+  id                 String        @id @default(cuid())
+  bookingId          String        @unique
+  amount             Float
+  currency           String        @default("NGN")
+  status             PaymentStatus @default(PENDING)
+  paystackReference  String?       @unique
+  paystackAccessCode String?
+  paidAt             DateTime?
+  releasedAt         DateTime?
+  refundedAt         DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  booking Booking @relation(fields: [bookingId], references: [id])
+
+  @@map("payments")
+}
+
+// ─── Payment Method ───────────────────────────────────────────────────────────
+
+model PaymentMethod {
+  id               String   @id @default(cuid())
+  userId           String
+  type             String   // "CARD" | "BANK_TRANSFER"
+  brand            String?
+  last4            String?
+  expiryMonth      Int?
+  expiryYear       Int?
+  paystackAuthCode String?
+  isDefault        Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("payment_methods")
+}
+
+// ─── Conversation / Messaging ─────────────────────────────────────────────────
+
+model Conversation {
+  id        String   @id @default(cuid())
+  bookingId String?  @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  participants ConversationParticipant[]
+  messages     Message[]
+
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  conversationId String
+  userId         String
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, userId])
+  @@map("conversation_participants")
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  senderId       String
+  bookingId      String?
+  text           String
+  isRead         Boolean  @default(false)
+  sentAt         DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation("SentMessages", fields: [senderId], references: [id])
+  booking      Booking?     @relation(fields: [bookingId], references: [id])
+
+  @@map("messages")
+}
+
+// ─── Review ───────────────────────────────────────────────────────────────────
+
+model Review {
+  id               String   @id @default(cuid())
+  bookingId        String   @unique
+  customerId       String
+  artisanProfileId String
+  rating           Float
+  comment          String?
+  createdAt        DateTime @default(now())
+
+  booking        Booking        @relation(fields: [bookingId], references: [id])
+  customer       User           @relation("CustomerReviews", fields: [customerId], references: [id])
+  artisanProfile ArtisanProfile @relation(fields: [artisanProfileId], references: [id])
+
+  @@map("reviews")
+}
+
+// ─── Notification ─────────────────────────────────────────────────────────────
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  bookingId String?
+  type      NotificationType
+  title     String
+  body      String
+  isRead    Boolean          @default(false)
+  sentAt    DateTime         @default(now())
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  booking Booking? @relation(fields: [bookingId], references: [id])
+
+  @@map("notifications")
+}
+
+// ─── Saved Address ────────────────────────────────────────────────────────────
+
+model SavedAddress {
+  id        String   @id @default(cuid())
+  userId    String
+  label     String
+  address   String
+  city      String
+  state     String
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("saved_addresses")
+}
