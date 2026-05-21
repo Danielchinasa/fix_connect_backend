@@ -15,8 +15,8 @@ describe('AppController', () => {
   });
 
   describe('root', () => {
-    it('should return "Hello Daniel!"', () => {
-      expect(appController.getHello()).toBe('Hello Daniel!');
+    it('should return "Welcome to FixConnect API!"', () => {
+      expect(appController.getHello()).toBe('Welcome to FixConnect API!');
     });
   });
 });
