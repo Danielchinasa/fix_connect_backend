@@ -2,6 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { AuthService } from './auth.service';
+import { OtpService } from './otp.service';
+import { EmailService } from '../email/email.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 describe('AuthService', () => {
@@ -37,6 +39,22 @@ describe('AuthService', () => {
           provide: ConfigService,
           useValue: {
             get: jest.fn(),
+          },
+        },
+        {
+          provide: OtpService,
+          useValue: {
+            generateAndStore: jest.fn(),
+            verify: jest.fn(),
+            verifyEmailOtp: jest.fn(),
+            verifyAndResetPassword: jest.fn(),
+            requireUser: jest.fn(),
+          },
+        },
+        {
+          provide: EmailService,
+          useValue: {
+            sendOtp: jest.fn(),
           },
         },
       ],

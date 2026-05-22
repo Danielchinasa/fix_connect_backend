@@ -11,6 +11,9 @@ import { LoginDto } from './dto/login.dto';
 import { SignupDto } from './dto/signup.dto';
 import { JwtPayload } from './types/jwt-payload.type';
 import { Role } from '@prisma/client';
+import { OtpService } from './otp.service';
+import { OTP_PURPOSE } from './types/otp-purpose.type';
+import { EmailService } from '../email/email.service';
 
 @Injectable()
 export class AuthService {
@@ -18,6 +21,8 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly otpService: OtpService,
+    private readonly emailService: EmailService,
   ) {}
 
   async signup(dto: SignupDto) {
@@ -68,6 +73,25 @@ export class AuthService {
     );
     if (!passwordMatches) {
       throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // Block unverified users from obtaining tokens.
+    // Automatically re-send an OTP so the mobile app can redirect
+    // straight to the verification screen without an extra tap.
+    if (!user.isVerified) {
+      const code = await this.otpService.generateAndStore(
+        user.id,
+        OTP_PURPOSE.VERIFY_EMAIL,
+      );
+      await this.emailService.sendOtp(
+        user.email,
+        code,
+        OTP_PURPOSE.VERIFY_EMAIL,
+      );
+
+      throw new UnauthorizedException(
+        'Email not verified. A new code has been sent to your email address.',
+      );
     }
 
     const tokens = await this.generateTokens(user.id, user.email, user.role);
@@ -152,6 +176,57 @@ export class AuthService {
     }
 
     return this.toSafeUser(user);
+  }
+
+  // ─── OTP: send a verification or forgot-password code ──────────────────────
+  async sendOtp(
+    email: string,
+    purpose: (typeof OTP_PURPOSE)[keyof typeof OTP_PURPOSE],
+  ): Promise<{ message: string }> {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+
+    if (purpose === OTP_PURPOSE.VERIFY_EMAIL) {
+      if (!user) {
+        throw new BadRequestException('No account found with this email');
+      }
+      if (user.isVerified) {
+        throw new BadRequestException('This email is already verified');
+      }
+    }
+
+    // For FORGOT_PASSWORD: return a generic response even when the email
+    // is not registered to prevent user-enumeration attacks.
+    if (!user) {
+      return { message: 'If that email is registered, a code has been sent.' };
+    }
+
+    const code = await this.otpService.generateAndStore(user.id, purpose);
+    await this.emailService.sendOtp(email, code, purpose);
+
+    return { message: 'Verification code sent to your email address.' };
+  }
+
+  // ─── OTP: verify email address ─────────────────────────────────────────────
+  async verifyEmail(email: string, code: string): Promise<{ message: string }> {
+    const user = await this.otpService.requireUser(email);
+    await this.otpService.verifyEmailOtp(user.id, code);
+    return { message: 'Email verified successfully.' };
+  }
+
+  // ─── OTP: reset password ───────────────────────────────────────────────────
+  async resetPassword(
+    email: string,
+    code: string,
+    newPassword: string,
+  ): Promise<{ message: string }> {
+    const user = await this.otpService.requireUser(email);
+    const newPasswordHash = await bcrypt.hash(newPassword, 10);
+    await this.otpService.verifyAndResetPassword(
+      user.id,
+      code,
+      newPasswordHash,
+    );
+    return { message: 'Password reset successfully. Please log in again.' };
   }
 
   private async generateTokens(userId: string, email: string, role: Role) {
