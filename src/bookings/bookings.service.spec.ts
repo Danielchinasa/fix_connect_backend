@@ -1,5 +1,7 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { BookingStatus, Role } from '@prisma/client';
+import { EmailService } from '../email/email.service';
+import { PaymentsService } from '../payments/payments.service';
 import { BookingsService } from './bookings.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -53,8 +55,11 @@ describe('BookingsService', () => {
       update: jest.Mock;
     };
     artisanProfile: { findUnique: jest.Mock; update: jest.Mock };
+    notification: { create: jest.Mock };
     $transaction: jest.Mock;
   };
+  let emailService: { sendEmail: jest.Mock };
+  let paymentsService: { releaseToArtisan: jest.Mock };
 
   beforeEach(() => {
     prisma = {
@@ -65,12 +70,22 @@ describe('BookingsService', () => {
         update: jest.fn(),
       },
       artisanProfile: { findUnique: jest.fn(), update: jest.fn() },
+      notification: { create: jest.fn().mockResolvedValue({}) },
       // Simulate $transaction by running the callback with the prisma mock itself.
-      // In real code, Prisma wraps the callback in a DB transaction; here we just
-      // want to verify the logic inside the callback without a real DB.
-      $transaction: jest.fn().mockImplementation((cb) => cb(prisma)),
+      // Returns a resolved Promise so the .then() chained in updateStatus works.
+      $transaction: jest
+        .fn()
+        .mockImplementation((cb) => Promise.resolve(cb(prisma))),
     };
-    service = new BookingsService(prisma as unknown as PrismaService);
+    emailService = { sendEmail: jest.fn().mockResolvedValue(undefined) };
+    paymentsService = {
+      releaseToArtisan: jest.fn().mockResolvedValue(undefined),
+    };
+    service = new BookingsService(
+      prisma as unknown as PrismaService,
+      emailService as unknown as EmailService,
+      paymentsService as unknown as PaymentsService,
+    );
   });
 
   // ─── create ─────────────────────────────────────────────────────────────────
@@ -86,8 +101,15 @@ describe('BookingsService', () => {
     };
 
     it('creates and returns booking', async () => {
+      // Artisan fetch now includes user for notification delivery
       prisma.artisanProfile.findUnique.mockResolvedValueOnce({
         id: 'profile-1',
+        userId: 'user-artisan',
+        user: {
+          id: 'user-artisan',
+          email: 'artisan@test.com',
+          firstName: 'John',
+        },
       });
       const booking = makeBooking();
       prisma.booking.create.mockResolvedValueOnce(booking);

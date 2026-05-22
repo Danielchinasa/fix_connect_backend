@@ -9,6 +9,10 @@ import { ServiceCategoriesModule } from './service-categories/service-categories
 import { ArtisansModule } from './artisans/artisans.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { ReviewsModule } from './reviews/reviews.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { SavedAddressesModule } from './saved-addresses/saved-addresses.module';
+import { PaymentsModule } from './payments/payments.module';
+import { BankAccountsModule } from './bank-accounts/bank-accounts.module';
 
 @Module({
   imports: [
@@ -23,6 +27,10 @@ import { ReviewsModule } from './reviews/reviews.module';
     ArtisansModule,
     BookingsModule,
     ReviewsModule,
+    NotificationsModule,
+    SavedAddressesModule,
+    PaymentsModule,
+    BankAccountsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

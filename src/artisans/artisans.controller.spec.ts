@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ArtisansController } from './artisans.controller';
 import { ArtisansService } from './artisans.service';
@@ -9,6 +10,8 @@ const mockService = {
   create: jest.fn(),
   update: jest.fn(),
   setCategories: jest.fn(),
+  addWorkSample: jest.fn(),
+  removeWorkSample: jest.fn(),
 };
 
 describe('ArtisansController', () => {
@@ -83,6 +86,56 @@ describe('ArtisansController', () => {
     ).resolves.toBeUndefined();
     expect(mockService.setCategories).toHaveBeenCalledWith('user-1', {
       categoryIds: ['cat-1'],
+    });
+  });
+
+  describe('addWorkSample', () => {
+    const fakeFile = {
+      filename: 'sample-123.jpg',
+      mimetype: 'image/jpeg',
+    } as Express.Multer.File;
+
+    it('calls service with imageUrl and caption', async () => {
+      const sample = {
+        id: 'ws-1',
+        imageUrl: '/uploads/work-samples/sample-123.jpg',
+      };
+      mockService.addWorkSample.mockResolvedValueOnce(sample);
+
+      const result = await controller.addWorkSample(
+        'user-1',
+        fakeFile,
+        'My tiling work',
+      );
+
+      expect(mockService.addWorkSample).toHaveBeenCalledWith(
+        'user-1',
+        '/uploads/work-samples/sample-123.jpg',
+        'My tiling work',
+      );
+      expect(result).toBe(sample);
+    });
+
+    it('throws BadRequestException when no file is provided', () => {
+      expect(() =>
+        controller.addWorkSample(
+          'user-1',
+          undefined as unknown as Express.Multer.File,
+          undefined,
+        ),
+      ).toThrow(BadRequestException);
+      expect(mockService.addWorkSample).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('removeWorkSample', () => {
+    it('calls service.removeWorkSample with userId and sampleId', async () => {
+      mockService.removeWorkSample.mockResolvedValueOnce(undefined);
+      await controller.removeWorkSample('user-1', 'ws-1');
+      expect(mockService.removeWorkSample).toHaveBeenCalledWith(
+        'user-1',
+        'ws-1',
+      );
     });
   });
 });

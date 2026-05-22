@@ -1,7 +1,11 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -27,8 +31,13 @@ const DETAIL_INCLUDE = {
   workSamples: true,
 } as const;
 
+// Maximum work samples an artisan can upload
+const MAX_WORK_SAMPLES = 10;
+
 @Injectable()
 export class ArtisansService {
+  private readonly logger = new Logger(ArtisansService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   // ─── Public: list all artisans ───────────────────────────────────────────────
@@ -101,6 +110,62 @@ export class ArtisansService {
       data: dto,
       include: DETAIL_INCLUDE,
     });
+  }
+
+  // ─── Artisan: add a work sample ─────────────────────────────────────────────
+  // imageUrl is the path built by the controller after multer saves the file.
+  // caption is optional free text shown under the image in the portfolio.
+  // Capped at MAX_WORK_SAMPLES to prevent runaway uploads.
+  async addWorkSample(userId: string, imageUrl: string, caption?: string) {
+    const profile = await this.findMyProfile(userId);
+
+    const count = await this.prisma.workSample.count({
+      where: { artisanProfileId: profile.id },
+    });
+
+    if (count >= MAX_WORK_SAMPLES) {
+      throw new BadRequestException(
+        `You can have at most ${MAX_WORK_SAMPLES} work samples. Delete one before adding more.`,
+      );
+    }
+
+    return this.prisma.workSample.create({
+      data: { artisanProfileId: profile.id, imageUrl, caption },
+    });
+  }
+
+  // ─── Artisan: delete a work sample ───────────────────────────────────────────
+  // Verifies the sample belongs to the requesting artisan before deleting.
+  // Also removes the uploaded file from disk so orphaned files don't accumulate.
+  async removeWorkSample(userId: string, workSampleId: string): Promise<void> {
+    const profile = await this.findMyProfile(userId);
+
+    const sample = await this.prisma.workSample.findUnique({
+      where: { id: workSampleId },
+    });
+
+    if (!sample) {
+      throw new NotFoundException(`Work sample '${workSampleId}' not found`);
+    }
+
+    if (sample.artisanProfileId !== profile.id) {
+      throw new ForbiddenException('You do not own this work sample');
+    }
+
+    await this.prisma.workSample.delete({ where: { id: workSampleId } });
+
+    // Best-effort: delete the file from disk after removing the DB record.
+    // imageUrl is e.g. /uploads/work-samples/sample-xxx.jpg — we resolve it
+    // relative to the project root (process.cwd()).
+    try {
+      const filePath = path.join(process.cwd(), sample.imageUrl);
+      await fs.promises.unlink(filePath);
+    } catch (err: unknown) {
+      // Not a fatal error — DB record is already gone; log and move on
+      this.logger.warn(
+        `Could not delete work sample file '${sample.imageUrl}': ${(err as Error).message}`,
+      );
+    }
   }
 
   // ─── Artisan: replace service categories ─────────────────────────────────────
