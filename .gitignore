@@ -63,3 +63,6 @@ fix_connect_mobile/
 # User-uploaded files — tracked by folder structure but not contents
 uploads/**/*
 !uploads/**/.gitkeep
+
+# Postman collection — local dev tool, not part of the source
+FixConnect.postman_collection.json

@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { ArtisansService } from './artisans.service';
@@ -38,6 +39,12 @@ describe('ArtisansService', () => {
     };
     serviceCategory: { findMany: jest.Mock };
     artisanCategory: { deleteMany: jest.Mock; createMany: jest.Mock };
+    workSample: {
+      count: jest.Mock;
+      create: jest.Mock;
+      findUnique: jest.Mock;
+      delete: jest.Mock;
+    };
     $transaction: jest.Mock;
   };
 
@@ -51,6 +58,12 @@ describe('ArtisansService', () => {
       },
       serviceCategory: { findMany: jest.fn() },
       artisanCategory: { deleteMany: jest.fn(), createMany: jest.fn() },
+      workSample: {
+        count: jest.fn().mockResolvedValue(0),
+        create: jest.fn(),
+        findUnique: jest.fn(),
+        delete: jest.fn().mockResolvedValue({}),
+      },
       // Simulate $transaction by executing the callback with the prisma mock
       $transaction: jest.fn().mockImplementation((cb) => cb(prisma)),
     };
@@ -197,6 +210,92 @@ describe('ArtisansService', () => {
           categoryIds: ['cat-1', 'invalid-id'],
         }),
       ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  // ─── addWorkSample ──────────────────────────────────────────────────────────
+  describe('addWorkSample', () => {
+    it('creates and returns a work sample', async () => {
+      prisma.artisanProfile.findUnique.mockResolvedValueOnce(makeProfile());
+      const sample = {
+        id: 'ws-1',
+        artisanProfileId: 'profile-1',
+        imageUrl: '/uploads/work-samples/sample-1.jpg',
+        caption: 'Tiled bathroom',
+      };
+      prisma.workSample.create.mockResolvedValueOnce(sample);
+
+      const result = await service.addWorkSample(
+        'user-1',
+        '/uploads/work-samples/sample-1.jpg',
+        'Tiled bathroom',
+      );
+
+      expect(prisma.workSample.create).toHaveBeenCalledWith({
+        data: {
+          artisanProfileId: 'profile-1',
+          imageUrl: '/uploads/work-samples/sample-1.jpg',
+          caption: 'Tiled bathroom',
+        },
+      });
+      expect(result).toBe(sample);
+    });
+
+    it('throws BadRequestException when 10 samples already exist', async () => {
+      prisma.artisanProfile.findUnique.mockResolvedValueOnce(makeProfile());
+      prisma.workSample.count.mockResolvedValueOnce(10);
+
+      await expect(
+        service.addWorkSample('user-1', '/uploads/work-samples/sample-x.jpg'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('throws NotFoundException when artisan has no profile', async () => {
+      prisma.artisanProfile.findUnique.mockResolvedValueOnce(null);
+      await expect(
+        service.addWorkSample('user-1', '/uploads/work-samples/sample-x.jpg'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  // ─── removeWorkSample ───────────────────────────────────────────────────────
+  describe('removeWorkSample', () => {
+    it('deletes the work sample for the owner', async () => {
+      prisma.artisanProfile.findUnique.mockResolvedValueOnce(makeProfile());
+      prisma.workSample.findUnique.mockResolvedValueOnce({
+        id: 'ws-1',
+        artisanProfileId: 'profile-1',
+        imageUrl: '/uploads/work-samples/sample-1.jpg',
+      });
+
+      await expect(
+        service.removeWorkSample('user-1', 'ws-1'),
+      ).resolves.toBeUndefined();
+      expect(prisma.workSample.delete).toHaveBeenCalledWith({
+        where: { id: 'ws-1' },
+      });
+    });
+
+    it('throws NotFoundException when sample does not exist', async () => {
+      prisma.artisanProfile.findUnique.mockResolvedValueOnce(makeProfile());
+      prisma.workSample.findUnique.mockResolvedValueOnce(null);
+
+      await expect(
+        service.removeWorkSample('user-1', 'bad-id'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('throws ForbiddenException when sample belongs to a different artisan', async () => {
+      prisma.artisanProfile.findUnique.mockResolvedValueOnce(makeProfile());
+      prisma.workSample.findUnique.mockResolvedValueOnce({
+        id: 'ws-1',
+        artisanProfileId: 'other-profile', // different profile
+        imageUrl: '/uploads/work-samples/sample-1.jpg',
+      });
+
+      await expect(
+        service.removeWorkSample('user-1', 'ws-1'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
     });
   });
 });

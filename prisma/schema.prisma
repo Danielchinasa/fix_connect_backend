@@ -135,6 +135,7 @@ model ArtisanProfile {
   reviews     Review[]
   workSamples WorkSample[]
   categories  ArtisanCategory[]
+  bankAccount ArtisanBankAccount?
 
   @@map("artisan_profiles")
 }
@@ -218,9 +219,18 @@ model Payment {
   bookingId          String        @unique
   amount             Float
   currency           String        @default("NGN")
+  // Which payment gateway processed this: "PAYSTACK" | "STRIPE"
+  gateway            String        @default("PAYSTACK")
   status             PaymentStatus @default(PENDING)
+  // Paystack fields (paystackReference also used for Stripe PaymentIntent ID)
   paystackReference  String?       @unique
   paystackAccessCode String?
+  // Customer-facing checkout details
+  paymentUrl         String?       // Redirect to complete payment
+  ussdCode           String?       // e.g. *737*000*5000*ref# for GTBank
+  bankTransferBankName    String?  // Virtual bank name for bank transfer
+  bankTransferAccount     String?  // Virtual account number
+  // Timestamps
   paidAt             DateTime?
   releasedAt         DateTime?
   refundedAt         DateTime?
@@ -249,6 +259,27 @@ model PaymentMethod {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("payment_methods")
+}
+
+// ─── Artisan Bank Account ─────────────────────────────────────────────────────
+// Artisans register their payout bank account here.
+// The paystackRecipientCode is created once via the Paystack Transfer Recipient
+// API and is used for every subsequent disbursement.
+
+model ArtisanBankAccount {
+  id                    String   @id @default(cuid())
+  artisanProfileId      String   @unique
+  bankName              String
+  bankCode              String   // Paystack bank code e.g. "058" for GTBank
+  accountNumber         String
+  accountName           String   // Verified account name from Paystack API
+  paystackRecipientCode String?  // Created by POST /transferrecipient
+  isVerified            Boolean  @default(false)
+  createdAt             DateTime @default(now())
+
+  artisanProfile ArtisanProfile @relation(fields: [artisanProfileId], references: [id], onDelete: Cascade)
+
+  @@map("artisan_bank_accounts")
 }
 
 // ─── Conversation / Messaging ─────────────────────────────────────────────────

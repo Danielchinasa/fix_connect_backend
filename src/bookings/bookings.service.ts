@@ -1,11 +1,14 @@
 import {
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { BookingStatus, Role } from '@prisma/client';
+import { BookingStatus, NotificationType, Role } from '@prisma/client';
+import { EmailService } from '../email/email.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
+import { PaymentsService } from '../payments/payments.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingStatusDto } from './dto/update-booking-status.dto';
 
@@ -44,15 +47,26 @@ const TERMINAL_STATUSES = new Set<BookingStatus>([
 
 @Injectable()
 export class BookingsService {
-  constructor(private readonly prisma: PrismaService) {}
+  // Logger lets us record notification failures without crashing the request
+  private readonly logger = new Logger(BookingsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly emailService: EmailService,
+    private readonly paymentsService: PaymentsService,
+  ) {}
 
   // ─── Customer: create a booking ───────────────────────────────────────────────
   // The customer ID comes from the JWT — customers cannot book on behalf of others.
   // artisanProfileId and categoryId are validated by FK constraints in the DB.
   async create(customerId: string, dto: CreateBookingDto) {
-    // Verify artisan exists before creating
+    // Fetch the artisan and include their user account so we have their
+    // email and name ready for notifications — one query instead of two.
     const artisan = await this.prisma.artisanProfile.findUnique({
       where: { id: dto.artisanProfileId },
+      include: {
+        user: { select: { id: true, email: true, firstName: true } },
+      },
     });
     if (!artisan) {
       throw new NotFoundException(
@@ -60,7 +74,7 @@ export class BookingsService {
       );
     }
 
-    return this.prisma.booking.create({
+    const booking = await this.prisma.booking.create({
       data: {
         customerId,
         artisanProfileId: dto.artisanProfileId,
@@ -74,6 +88,21 @@ export class BookingsService {
       },
       include: BOOKING_INCLUDE,
     });
+
+    // ─── Fire notifications (best-effort) ──────────────────────────────────
+    // We do NOT await this — the booking is already saved and the customer
+    // gets their response immediately. If the notification or email fails
+    // (e.g. email provider is down), we log the error but do not throw.
+    // In a production system you would use a job queue (e.g. Bull) here
+    // for guaranteed delivery and automatic retries.
+    this.sendBookingNotifications(booking, artisan).catch((err: unknown) =>
+      this.logger.error(
+        'Failed to send booking notifications',
+        err instanceof Error ? err.message : err,
+      ),
+    );
+
+    return booking;
   }
 
   // ─── Customer: list own bookings ──────────────────────────────────────────────
@@ -166,23 +195,90 @@ export class BookingsService {
     // We use $transaction so the booking update and the artisan counter increment
     // either both succeed or both fail. Without a transaction, a server crash
     // between the two writes would leave the data inconsistent.
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.booking.update({
-        where: { id },
-        data: { status: dto.status },
-        include: BOOKING_INCLUDE,
-      });
-
-      // When the artisan marks the job COMPLETED, increment their completed-jobs
-      // counter. This keeps the profile stat current without a separate query.
-      if (dto.status === BookingStatus.COMPLETED) {
-        await tx.artisanProfile.update({
-          where: { id: booking.artisanProfileId },
-          data: { completedJobs: { increment: 1 } },
+    return this.prisma
+      .$transaction(async (tx) => {
+        const updated = await tx.booking.update({
+          where: { id },
+          data: { status: dto.status },
+          include: BOOKING_INCLUDE,
         });
-      }
 
-      return updated;
+        // When the artisan marks the job COMPLETED, increment their completed-jobs
+        // counter. This keeps the profile stat current without a separate query.
+        if (dto.status === BookingStatus.COMPLETED) {
+          await tx.artisanProfile.update({
+            where: { id: booking.artisanProfileId },
+            data: { completedJobs: { increment: 1 } },
+          });
+        }
+
+        return updated;
+      })
+      .then((updated) => {
+        // Fire-and-forget: release escrow funds to the artisan.
+        // We do this AFTER the transaction commits so the booking status is
+        // already COMPLETED when the gateway call is logged.
+        // A gateway error here must never roll back the status change.
+        if (dto.status === BookingStatus.COMPLETED) {
+          this.paymentsService
+            .releaseToArtisan(id)
+            .catch((err: Error) =>
+              this.logger.error(
+                `Failed to release payment for booking ${id}: ${err.message}`,
+              ),
+            );
+        }
+        return updated;
+      });
+  }
+
+  // ─── Private: send booking notifications ───────────────────────────────────
+  // Creates an in-app notification record AND sends an email to the artisan.
+  // Runs after the booking is persisted — called fire-and-forget from create().
+  private async sendBookingNotifications(
+    booking: {
+      id: string;
+      serviceDescription: string;
+      scheduledDate: Date;
+      timeSlot: string;
+      address: string;
+    },
+    artisan: { userId: string; user: { email: string; firstName: string } },
+  ): Promise<void> {
+    const formattedDate = booking.scheduledDate.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+
+    // 1. In-app notification — stored in DB, visible in the app's notification list
+    await this.prisma.notification.create({
+      data: {
+        userId: artisan.userId,
+        bookingId: booking.id,
+        type: NotificationType.BOOKING_CONFIRMED,
+        title: 'New booking request',
+        body: `You have a new booking for "${booking.serviceDescription}" on ${formattedDate}.`,
+      },
+    });
+
+    // 2. Email — sends to the artisan's registered email address
+    await this.emailService.sendEmail({
+      to: artisan.user.email,
+      subject: 'FixConnect – New Booking Request',
+      text: [
+        `Hi ${artisan.user.firstName},`,
+        '',
+        'You have a new booking request on FixConnect.',
+        '',
+        `Service   : ${booking.serviceDescription}`,
+        `Date      : ${formattedDate}`,
+        `Time slot : ${booking.timeSlot}`,
+        `Address   : ${booking.address}`,
+        '',
+        'Open the FixConnect app to confirm or decline.',
+      ].join('\n'),
     });
   }
 

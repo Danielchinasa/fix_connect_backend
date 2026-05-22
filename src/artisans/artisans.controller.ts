@@ -1,17 +1,24 @@
 import {
+  BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
+  Param,
   Patch,
   Post,
   Put,
-  Param,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { Role } from '@prisma/client';
+import { diskStorage } from 'multer';
+import { extname } from 'path';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -21,6 +28,39 @@ import { ArtisansService } from './artisans.service';
 import { CreateArtisanProfileDto } from './dto/create-artisan-profile.dto';
 import { SetCategoriesDto } from './dto/set-categories.dto';
 import { UpdateArtisanProfileDto } from './dto/update-artisan-profile.dto';
+
+// ─── Multer config for work sample uploads ────────────────────────────────────
+// Stored in ./uploads/work-samples/ (served as /uploads/work-samples/ by main.ts)
+// Same rules as avatar: JPEG / PNG / WebP, 5 MB max.
+const workSampleUploadConfig = {
+  storage: diskStorage({
+    destination: './uploads/work-samples',
+    filename: (
+      _req: Express.Request,
+      file: Express.Multer.File,
+      cb: (error: Error | null, filename: string) => void,
+    ) => {
+      const unique = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+      cb(null, `sample-${unique}${extname(file.originalname).toLowerCase()}`);
+    },
+  }),
+  fileFilter: (
+    _req: Express.Request,
+    file: Express.Multer.File,
+    cb: (error: Error | null, acceptFile: boolean) => void,
+  ) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+    if (allowed.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(
+        new BadRequestException('Only JPEG, PNG, and WebP images are accepted'),
+        false,
+      );
+    }
+  },
+  limits: { fileSize: 5 * 1024 * 1024 },
+};
 
 // ─── Route ordering note ───────────────────────────────────────────────────────
 // In NestJS, literal routes must be declared BEFORE parameterised routes in the
@@ -86,5 +126,41 @@ export class ArtisansController {
     @Body() dto: SetCategoriesDto,
   ) {
     return this.service.setCategories(user.sub, dto);
+  }
+
+  // ─── Artisan: upload a work sample image ──────────────────────────────────────
+  // Accepts multipart/form-data with:
+  //   image   — required image file (JPEG / PNG / WebP, max 5 MB)
+  //   caption — optional text shown under the image in the portfolio
+  // Limited to 10 samples per artisan (enforced in the service).
+  @Post('work-samples')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ARTISAN)
+  @UseInterceptors(FileInterceptor('image', workSampleUploadConfig))
+  addWorkSample(
+    @CurrentUser('sub') userId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Body('caption') caption?: string,
+  ) {
+    if (!file) {
+      throw new BadRequestException(
+        'No image received. Send the image as multipart/form-data with field name "image".',
+      );
+    }
+    const imageUrl = `/uploads/work-samples/${file.filename}`;
+    return this.service.addWorkSample(userId, imageUrl, caption);
+  }
+
+  // ─── Artisan: delete a work sample ───────────────────────────────────────────
+  // Returns 204 No Content. Ownership is verified inside the service.
+  @Delete('work-samples/:sampleId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ARTISAN)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  removeWorkSample(
+    @CurrentUser('sub') userId: string,
+    @Param('sampleId') sampleId: string,
+  ) {
+    return this.service.removeWorkSample(userId, sampleId);
   }
 }
