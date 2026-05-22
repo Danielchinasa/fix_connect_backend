@@ -56,3 +56,10 @@ pids
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 /generated/prisma
+
+# Flutter mobile app — kept in repo for reference but not tracked by the backend git history
+fix_connect_mobile/
+
+# User-uploaded files — tracked by folder structure but not contents
+uploads/**/*
+!uploads/**/.gitkeep

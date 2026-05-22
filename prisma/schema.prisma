@@ -61,6 +61,11 @@ model User {
   role         Role     @default(CUSTOMER)
   isVerified   Boolean  @default(false)
   isActive     Boolean  @default(true)
+  // Extended profile fields shown on the personal-information screen
+  bio          String?
+  dateOfBirth  DateTime?
+  gender       String?
+  city         String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

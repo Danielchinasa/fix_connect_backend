@@ -7,6 +7,8 @@ import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { ServiceCategoriesModule } from './service-categories/service-categories.module';
 import { ArtisansModule } from './artisans/artisans.module';
+import { BookingsModule } from './bookings/bookings.module';
+import { ReviewsModule } from './reviews/reviews.module';
 
 @Module({
   imports: [
@@ -19,6 +21,8 @@ import { ArtisansModule } from './artisans/artisans.module';
     AuthModule,
     ServiceCategoriesModule,
     ArtisansModule,
+    BookingsModule,
+    ReviewsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
