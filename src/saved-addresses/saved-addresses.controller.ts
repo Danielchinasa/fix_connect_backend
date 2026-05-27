@@ -3,8 +3,6 @@ import {
   Controller,
   Delete,
   Get,
-  HttpCode,
-  HttpStatus,
   Param,
   Patch,
   Post,
@@ -39,37 +37,41 @@ export class SavedAddressesController {
 
   // ─── Create ──────────────────────────────────────────────────────────────────
   @Post()
-  create(
+  async create(
     @CurrentUser('sub') userId: string,
     @Body() dto: CreateSavedAddressDto,
   ) {
-    return this.savedAddressesService.create(userId, dto);
+    const data = await this.savedAddressesService.create(userId, dto);
+    return { message: 'Address saved successfully', data };
   }
 
   // ─── Set default ─────────────────────────────────────────────────────────────
   // MUST come before PATCH /:id — otherwise NestJS would match "set-default"
   // as the :id parameter value and this route would never be reached.
   @Patch(':id/set-default')
-  setDefault(@CurrentUser('sub') userId: string, @Param('id') id: string) {
-    return this.savedAddressesService.setDefault(userId, id);
+  async setDefault(
+    @CurrentUser('sub') userId: string,
+    @Param('id') id: string,
+  ) {
+    const data = await this.savedAddressesService.setDefault(userId, id);
+    return { message: 'Default address updated', data };
   }
 
   // ─── Update ──────────────────────────────────────────────────────────────────
   @Patch(':id')
-  update(
+  async update(
     @CurrentUser('sub') userId: string,
     @Param('id') id: string,
     @Body() dto: UpdateSavedAddressDto,
   ) {
-    return this.savedAddressesService.update(userId, id, dto);
+    const data = await this.savedAddressesService.update(userId, id, dto);
+    return { message: 'Address updated successfully', data };
   }
 
   // ─── Delete ──────────────────────────────────────────────────────────────────
-  // 204 No Content is the correct HTTP status for a successful delete —
-  // the resource is gone so there is nothing to return in the body.
   @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@CurrentUser('sub') userId: string, @Param('id') id: string) {
-    return this.savedAddressesService.remove(userId, id);
+  async remove(@CurrentUser('sub') userId: string, @Param('id') id: string) {
+    await this.savedAddressesService.remove(userId, id);
+    return { message: 'Address deleted successfully' };
   }
 }

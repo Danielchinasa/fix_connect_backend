@@ -169,6 +169,24 @@ export class AuthService {
   async getProfile(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
+      include: {
+        artisanProfile: {
+          select: {
+            id: true,
+            specialty: true,
+            startingPrice: true,
+            location: true,
+            isVerified: true,
+            isOnline: true,
+            completedJobs: true,
+            rating: true,
+            responseTime: true,
+            weeklySchedule: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+      },
     });
 
     if (!user) {
@@ -316,11 +334,30 @@ export class AuthService {
     phone: string;
     firstName: string;
     lastName: string;
+    avatarUrl?: string | null;
     role: Role;
     isVerified: boolean;
     isActive: boolean;
+    bio?: string | null;
+    dateOfBirth?: Date | null;
+    gender?: string | null;
+    city?: string | null;
     createdAt: Date;
     updatedAt: Date;
+    artisanProfile?: {
+      id: string;
+      specialty: string;
+      startingPrice: number;
+      location: string;
+      isVerified: boolean;
+      isOnline: boolean;
+      completedJobs: number;
+      rating: number;
+      responseTime: string | null;
+      weeklySchedule: unknown;
+      createdAt: Date;
+      updatedAt: Date;
+    } | null;
   }) {
     return {
       id: user.id,
@@ -328,11 +365,17 @@ export class AuthService {
       phone: user.phone,
       firstName: user.firstName,
       lastName: user.lastName,
+      avatarUrl: user.avatarUrl ?? null,
       role: user.role,
       isVerified: user.isVerified,
       isActive: user.isActive,
+      bio: user.bio ?? null,
+      dateOfBirth: user.dateOfBirth ?? null,
+      gender: user.gender ?? null,
+      city: user.city ?? null,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
+      artisanProfile: user.artisanProfile ?? null,
     };
   }
 }
