@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 const makeCategory = (overrides = {}) => ({
   id: 'cat-1',
   name: 'Plumbing',
-  iconUrl: null,
+  iconSvg: null,
   description: 'All plumbing services',
   isActive: true,
   createdAt: new Date(),
