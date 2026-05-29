@@ -1,14 +1,16 @@
-import { IsOptional, IsString, IsUrl, MinLength } from 'class-validator';
+import { IsOptional, IsString, MinLength } from 'class-validator';
 
 export class CreateCategoryDto {
   @IsString()
   @MinLength(2)
   name!: string;
 
-  // iconUrl is an optional link to an icon image (SVG, PNG, etc.)
+  // Raw SVG markup for the category icon.
+  // Stored in the DB and returned inline with the category list so the
+  // Flutter app never makes a separate network request just for an icon.
   @IsOptional()
-  @IsUrl()
-  iconUrl?: string;
+  @IsString()
+  iconSvg?: string;
 
   @IsOptional()
   @IsString()
